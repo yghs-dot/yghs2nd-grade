@@ -1,0 +1,257 @@
+/***********************************************************************
+ * 미래융합 프로젝트 포럼 신청 - Google Apps Script 백엔드
+ * -----------------------------------------------------------------
+ * 이 스크립트를 "이 스프레드시트에 연결된 Apps Script"로 붙여넣고
+ * 웹앱으로 배포하면, Claude 계정 로그인 없이 누구나(학생 포함) 신청
+ * 데이터를 저장/조회할 수 있는 백엔드가 만들어집니다.
+ *
+ * 설치 방법은 함께 드리는 "설치_안내.md" 문서를 참고하세요.
+ ***********************************************************************/
+
+// ---------- 공통 유틸: 시트 가져오기(없으면 자동 생성) ----------
+function getSheet_(name, headers) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(name);
+  if (!sh) {
+    sh = ss.insertSheet(name);
+    sh.appendRow(headers);
+  }
+  return sh;
+}
+
+// ---------- 기본 프로그램(운영계획서 기반 4개 트랙) ----------
+function defaultPrograms_() {
+  return [
+    { id: 'trackA', name: '트랙 A. AI 리터러시 (AI 시대를 살아가는 디지털 시민)',
+      classes: [ { id: 'trackA-1', name: 'AI리터러시 1반' }, { id: 'trackA-2', name: 'AI리터러시 2반' } ] },
+    { id: 'trackB', name: '트랙 B. CSR 프로젝트 (우리 사회를 바꾸는 상생 기업 기획)',
+      classes: [ { id: 'trackB-1', name: 'CSR 1반' }, { id: 'trackB-2', name: 'CSR 2반' } ] },
+    { id: 'trackC', name: '트랙 C. ESG 프로젝트 (토론으로 이해하는 ESG 세상)',
+      classes: [ { id: 'trackC-1', name: 'ESG 1반' } ] },
+    { id: 'trackD', name: '트랙 D. 경제·금융 프로젝트 (올바른 투자의 첫걸음, 가치투자 시뮬레이션)',
+      classes: [ { id: 'trackD-1', name: '경제금융 1반' } ] }
+  ];
+}
+
+// ---------- Config 시트 (key | value) ----------
+function getConfig_() {
+  var sh = getSheet_('Config', ['key', 'value']);
+  var data = sh.getDataRange().getValues();
+  var map = {};
+  for (var i = 1; i < data.length; i++) { map[data[i][0]] = data[i][1]; }
+  var programs = [];
+  try { programs = JSON.parse(map.programs || '[]'); } catch (e) { programs = []; }
+  return {
+    openAt: map.openAt || '2026-07-15T09:00',
+    adminPassword: map.adminPassword || 'admin1234',
+    programs: (programs && programs.length) ? programs : defaultPrograms_()
+  };
+}
+function setConfigValue_(sh, key, value) {
+  var data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === key) { sh.getRange(i + 1, 2).setValue(value); return; }
+  }
+  sh.appendRow([key, value]);
+}
+function setConfig_(payload) {
+  var sh = getSheet_('Config', ['key', 'value']);
+  setConfigValue_(sh, 'openAt', payload.openAt || '');
+  setConfigValue_(sh, 'adminPassword', payload.adminPassword || 'admin1234');
+  setConfigValue_(sh, 'programs', JSON.stringify(payload.programs || []));
+  return { success: true };
+}
+
+// ---------- Roster 시트 (sid | name | birth) ----------
+function getRoster_() {
+  var sh = getSheet_('Roster', ['sid', 'name', 'birth']);
+  var data = sh.getDataRange().getValues();
+  var out = [];
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === '' || data[i][0] === null) continue;
+    out.push({ sid: String(data[i][0]), name: String(data[i][1]), birth: String(data[i][2]) });
+  }
+  return { roster: out };
+}
+function saveRoster_(payload) {
+  var sh = getSheet_('Roster', ['sid', 'name', 'birth']);
+  var data = sh.getDataRange().getValues();
+  var rowOf = {};
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] !== '' && data[i][0] !== null) rowOf[String(data[i][0])] = i + 1;
+  }
+  var added = 0, updated = 0;
+  (payload.rows || []).forEach(function (r) {
+    var sid = String(r.sid);
+    if (rowOf[sid]) { sh.getRange(rowOf[sid], 1, 1, 3).setValues([[sid, r.name, r.birth]]); updated++; }
+    else { sh.appendRow([sid, r.name, r.birth]); added++; }
+  });
+  return { success: true, added: added, updated: updated };
+}
+function clearRoster_() {
+  var sh = getSheet_('Roster', ['sid', 'name', 'birth']);
+  sh.clear();
+  sh.appendRow(['sid', 'name', 'birth']);
+  return { success: true };
+}
+
+// ---------- Applications 시트 ----------
+var APP_HEADERS = ['sid', 'name', 'birth', 'programId', 'programName', 'classId', 'className', 'group', 'appliedAt'];
+function readApplications_() {
+  var sh = getSheet_('Applications', APP_HEADERS);
+  var data = sh.getDataRange().getValues();
+  var out = [];
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === '' || data[i][0] === null) continue;
+    out.push({
+      sid: String(data[i][0]), name: data[i][1], birth: data[i][2],
+      programId: data[i][3], programName: data[i][4],
+      classId: data[i][5], className: data[i][6],
+      group: Number(data[i][7]), appliedAt: data[i][8]
+    });
+  }
+  return out;
+}
+function getGroupCounts_(payload) {
+  var apps = readApplications_();
+  var counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+  apps.forEach(function (a) {
+    if (a.programId === payload.programId && a.classId === payload.classId) {
+      counts[a.group] = (counts[a.group] || 0) + 1;
+    }
+  });
+  return { counts: counts };
+}
+function getClassApplications_(payload) {
+  var apps = readApplications_().filter(function (a) {
+    return a.programId === payload.programId && a.classId === payload.classId;
+  });
+  return { applications: apps };
+}
+function getAllApplications_() {
+  return { applications: readApplications_() };
+}
+function getOwner_(payload) {
+  var apps = readApplications_();
+  var found = null;
+  for (var i = 0; i < apps.length; i++) { if (apps[i].sid === String(payload.sid)) { found = apps[i]; break; } }
+  return { found: !!found, application: found };
+}
+function getNotApplied_() {
+  var roster = getRoster_().roster;
+  var apps = readApplications_();
+  var appliedSet = {};
+  apps.forEach(function (a) { appliedSet[a.sid] = true; });
+  var notApplied = roster.filter(function (r) { return !appliedSet[String(r.sid)]; });
+  return { notApplied: notApplied };
+}
+
+// ---------- 모둠 정원 규칙 (클라이언트와 동일한 규칙을 서버에서도 검증) ----------
+// 기본 모둠당 최대 5명. 5명이 채워진 모둠이 2개가 되는 순간부터 나머지 모둠은 최대 4명으로 조정.
+// 반 전체 정원은 26명.
+function computeGroupPlan_(counts) {
+  var n = 0;
+  for (var g = 1; g <= 6; g++) n += (counts[g] || 0);
+  var overflowUsed = 0;
+  for (g = 1; g <= 6; g++) { if ((counts[g] || 0) === 5) overflowUsed++; }
+  var effectiveCap = overflowUsed >= 2 ? 4 : 5;
+  var groups = {};
+  for (g = 1; g <= 6; g++) {
+    var c = counts[g] || 0;
+    var cap = c >= 5 ? 5 : effectiveCap;
+    groups[g] = { count: c, canJoin: n < 26 && c < cap, cap: cap };
+  }
+  return { n: n, groups: groups };
+}
+
+// ---------- 신청 처리 (Lock으로 동시 신청 충돌 방지) ----------
+function submitApplication_(payload) {
+  var apps = readApplications_();
+  for (var i = 0; i < apps.length; i++) {
+    if (apps[i].sid === String(payload.sid)) return { success: false, reason: 'already_applied' };
+  }
+  var counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+  apps.forEach(function (a) {
+    if (a.programId === payload.programId && a.classId === payload.classId) counts[a.group] = (counts[a.group] || 0) + 1;
+  });
+  var plan = computeGroupPlan_(counts);
+  var g = Number(payload.group);
+  if (!plan.groups[g] || !plan.groups[g].canJoin) return { success: false, reason: 'group_full' };
+  var sh = getSheet_('Applications', APP_HEADERS);
+  var appliedAt = new Date().toISOString();
+  sh.appendRow([payload.sid, payload.name, payload.birth, payload.programId, payload.programName,
+                payload.classId, payload.className, g, appliedAt]);
+  return { success: true, appliedAt: appliedAt };
+}
+function deleteApplication_(payload) {
+  var sh = getSheet_('Applications', APP_HEADERS);
+  var data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(payload.sid)) { sh.deleteRow(i + 1); return { success: true }; }
+  }
+  return { success: false, reason: 'not_found' };
+}
+function editApplication_(payload) {
+  var sh = getSheet_('Applications', APP_HEADERS);
+  var data = sh.getDataRange().getValues();
+  var rowIdx = -1;
+  for (var i = 1; i < data.length; i++) { if (String(data[i][0]) === String(payload.sid)) { rowIdx = i + 1; break; } }
+  if (rowIdx === -1) return { success: false, reason: 'not_found' };
+  var apps = readApplications_().filter(function (a) { return a.sid !== String(payload.sid); });
+  var counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+  apps.forEach(function (a) {
+    if (a.programId === payload.programId && a.classId === payload.classId) counts[a.group] = (counts[a.group] || 0) + 1;
+  });
+  var plan = computeGroupPlan_(counts);
+  var g = Number(payload.group);
+  if (!plan.groups[g] || !plan.groups[g].canJoin) return { success: false, reason: 'group_full' };
+  sh.getRange(rowIdx, 4, 1, 4).setValues([[payload.programId, payload.programName, payload.classId, payload.className]]);
+  sh.getRange(rowIdx, 8).setValue(g);
+  return { success: true };
+}
+
+// ---------- 웹앱 진입점 ----------
+function doGet(e) {
+  return ContentService.createTextOutput(JSON.stringify({ ok: true, message: '포럼 신청 API 정상 동작 중' }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  var result;
+  var needsLock = false;
+  var action = '';
+  try {
+    var body = JSON.parse(e.postData.contents);
+    action = body.action;
+    var payload = body.payload || {};
+    var writeActions = ['setConfig', 'saveRoster', 'clearRoster', 'submitApplication', 'deleteApplication', 'editApplication'];
+    var lock = null;
+    if (writeActions.indexOf(action) !== -1) {
+      lock = LockService.getScriptLock();
+      lock.waitLock(15000); // 최대 15초 대기 (동시 신청 몰림 대비)
+    }
+    try {
+      switch (action) {
+        case 'getConfig': result = getConfig_(); break;
+        case 'setConfig': result = setConfig_(payload); break;
+        case 'getRoster': result = getRoster_(); break;
+        case 'saveRoster': result = saveRoster_(payload); break;
+        case 'clearRoster': result = clearRoster_(); break;
+        case 'getGroupCounts': result = getGroupCounts_(payload); break;
+        case 'getClassApplications': result = getClassApplications_(payload); break;
+        case 'getAllApplications': result = getAllApplications_(); break;
+        case 'getOwner': result = getOwner_(payload); break;
+        case 'getNotApplied': result = getNotApplied_(); break;
+        case 'submitApplication': result = submitApplication_(payload); break;
+        case 'deleteApplication': result = deleteApplication_(payload); break;
+        case 'editApplication': result = editApplication_(payload); break;
+        default: result = { error: 'unknown action: ' + action };
+      }
+    } finally {
+      if (lock) lock.releaseLock();
+    }
+  } catch (err) {
+    result = { error: String(err) };
+  }
+  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+}
