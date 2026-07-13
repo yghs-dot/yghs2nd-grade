@@ -502,7 +502,7 @@ function topBar(showHome){
 
 // ---------- HOME ----------
 function isAppNotYetOpen(){
-  return STORAGE_OK && CONFIG && (new Date() < new Date(CONFIG.openAt));
+  return !!CONFIG && (new Date() < new Date(CONFIG.openAt));
 }
 function renderHome(){
   const app = document.getElementById('app');
@@ -518,7 +518,10 @@ function renderHome(){
       <h3 style="margin-top:0;">⏰ 아직 신청 시간이 아니에요</h3>
       <div class="msg-box">프로그램 신청은 아래 시각부터 시작됩니다.<br><b>${fmtDateTime(CONFIG.openAt)}</b> 이후<br>신청 시간이 열릴 때까지 잠시만 기다려주세요.</div>
       <div class="countdown" id="home-cd">--:--:--</div>
-    </div>` : ''}
+    </div>` : `
+    <div class="card">
+      <div class="success-box" style="margin:0;">✅ 지금 프로그램 신청이 가능합니다!<br><span style="font-size:12px;color:#6B7280;">(신청 시작: ${CONFIG ? fmtDateTime(CONFIG.openAt) : ''})</span></div>
+    </div>`}
     <div class="card">
       <h3 style="margin-top:0;">시작하기</h3>
       <button class="btn accent" onclick="handleStudentApplyClick()">🙋 학생 신청하기</button>
@@ -1054,12 +1057,14 @@ function saveConfigInBackground(showSuccessNow, successMsg){
 function saveOpenAt(){
   CONFIG.openAt = document.getElementById('cfg-open').value;
   saveConfigInBackground(true, '저장되었습니다.');
+  render(); // 대시보드 상단 배지와 설정 화면의 표시값을 즉시 갱신
 }
 function saveAdminPw(){
   const pw = document.getElementById('cfg-pw').value.trim();
   if(!pw){ showAlert('비밀번호를 입력해주세요.'); return; }
   CONFIG.adminPassword = pw;
   saveConfigInBackground(true, '비밀번호가 변경되었습니다.');
+  render();
 }
 function addProgram(){
   const el = document.getElementById('new-prog-name');
