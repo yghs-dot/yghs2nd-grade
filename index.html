@@ -261,7 +261,7 @@ function showModal(message, opts){
   overlay.innerHTML = `
     <div style="background:#fff;border-radius:18px;padding:22px;max-width:340px;width:100%;box-shadow:0 20px 50px rgba(0,0,0,.28);font-family:'Noto Sans KR',sans-serif;">
       <div style="font-size:15px;line-height:1.7;color:#242832;margin-bottom:${hasInput?'12px':'18px'};white-space:pre-line;">${message}</div>
-      ${hasInput ? `<input id="modal-input" type="${opts.inputType||'text'}" value="${inputDefault}" style="width:100%;padding:11px 12px;border-radius:10px;border:2px solid #E4E9F7;font-size:15px;margin-bottom:16px;font-family:'Noto Sans KR',sans-serif;">` : ''}
+      ${hasInput ? `<input id="modal-input" type="${opts.inputType||'text'}" value="${inputDefault}" style="width:100%;padding:11px 12px;border-radius:10px;border:2px solid #E4E9F7;font-size:15px;margin-bottom:16px;font-family:'Noto Sans KR',sans-serif;" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('modal-confirm-btn').click();}">` : ''}
       <div style="display:flex;gap:10px;">
         ${cancelText ? `<button id="modal-cancel-btn" style="flex:1;padding:12px;border-radius:12px;border:2px solid #E4E9F7;background:#fff;color:#6B7280;font-size:15px;font-family:'Jua','Noto Sans KR',sans-serif;">${cancelText}</button>` : ''}
         <button id="modal-confirm-btn" style="flex:1;padding:12px;border-radius:12px;border:none;background:#4C6EF5;color:#fff;font-size:15px;font-weight:700;font-family:'Jua','Noto Sans KR',sans-serif;">${confirmText}</button>
@@ -382,7 +382,7 @@ async function refreshConfigAndRoster(){
 function startBackgroundSync(){
   // 입력 중인 화면(텍스트 입력 등)을 방해하지 않도록 강제 재렌더링 없이 데이터만 주기적으로 최신화.
   // 화면 전환 시점의 명시적 새로고침과 함께 동작하므로 주기는 다소 여유 있게 설정.
-  setInterval(refreshConfigAndRoster, 15000);
+  setInterval(function(){ if(!document.hidden) refreshConfigAndRoster(); }, 25000); // 화면이 꺼져있을 땐 건너뛰어 서버 부하 절감
 }
 
 // ---------- utility ----------
@@ -425,20 +425,17 @@ function getTrackMeta(programId){
 function computeGroupPlan(counts, capacity){
   const cap = capacity || 26;
   const n = (counts[1]||0)+(counts[2]||0)+(counts[3]||0)+(counts[4]||0)+(counts[5]||0)+(counts[6]||0);
-  // 반 정원(capacity)에 따라 모둠 구성이 정해짐: 기본 4인 모둠 6개 + (정원-24)개 모둠만 5인까지 허용
-  // 예) 정원 24 → 4인×6, 정원 25 → 4인×5 + 5인×1, 정원 26 → 4인×4 + 5인×2
+  // 반 정원(capacity)에 따라 모둠 구성이 처음부터 고정됨: 기본 4인 모둠 6개 + (정원-24)개 모둠은 처음부터 5인까지 표시
+  // 예) 정원 24 → 전체 4인×6, 정원 25 → 4인×5 + 5인×1(마지막 모둠), 정원 26 → 4인×4 + 5인×2(마지막 2개 모둠)
   const baseCap = 4;
-  const overflowAllowed = Math.max(0, cap - 24);
-  const overflowUsed = [1,2,3,4,5,6].filter(g=>(counts[g]||0)===5).length;
+  const overflowSlots = Math.max(0, cap - 24); // 5인까지 허용되는 모둠 개수
   const groups = {};
   for(let g=1; g<=6; g++){
     const c = counts[g]||0;
-    let canJoin = false;
-    if(n < cap){
-      if(c < baseCap) canJoin = true;
-      else if(c===baseCap && overflowUsed<overflowAllowed) canJoin = true;
-    }
-    groups[g] = { active:true, count:c, canJoin, displayMax: c>=5?5:baseCap };
+    const isFiveCapGroup = g > (6 - overflowSlots); // 마지막 overflowSlots개 모둠을 5인 모둠으로 고정 지정
+    const groupCap = isFiveCapGroup ? 5 : baseCap;
+    const canJoin = n < cap && c < groupCap;
+    groups[g] = { active:true, count:c, canJoin, displayMax: groupCap };
   }
   return { n, capacity:cap, classFull: n>=cap, groups };
 }
@@ -581,12 +578,12 @@ function renderStudentLogin(){
     <div class="card">
       <h3 style="margin-top:0;">본인 확인</h3>
       <label>학번</label>
-      <input type="text" inputmode="numeric" id="in-sid" placeholder="예) 20305" value="${STATE.student.sid}">
+      <input type="text" inputmode="numeric" id="in-sid" placeholder="예) 20305" value="${STATE.student.sid}" onkeydown="if(event.key==='Enter') submitStudentLogin()">
       <label>이름 (한글)</label>
-      <input type="text" id="in-name" lang="ko" autocomplete="name" autocapitalize="off" spellcheck="false" placeholder="한글로 이름을 입력하세요" value="${STATE.student.name}">
+      <input type="text" id="in-name" lang="ko" autocomplete="name" autocapitalize="off" spellcheck="false" placeholder="한글로 이름을 입력하세요" value="${STATE.student.name}" onkeydown="if(event.key==='Enter') submitStudentLogin()">
       <label>생년월일 (8자리)</label>
       <input type="text" inputmode="numeric" id="in-birth" placeholder="0000.00.00" maxlength="10" value="${STATE.student.birth}"
-        oninput="this.value=formatBirthInput(this.value)">
+        oninput="this.value=formatBirthInput(this.value)" onkeydown="if(event.key==='Enter') submitStudentLogin()">
       <div id="login-err"></div>
       <button class="btn" onclick="submitStudentLogin()">다음</button>
     </div>
@@ -866,6 +863,7 @@ async function renderGroupSelectAsync(){
   // 다른 학생의 신청으로 정원이 바뀌는 것을 실시간에 가깝게 반영 (수 초 간격 자동 새로고침)
   STATE.groupPollTimer = setInterval(async ()=>{
     if(STATE.screen!=='groupSelect'){ clearInterval(STATE.groupPollTimer); STATE.groupPollTimer=null; return; }
+    if(document.hidden) return; // 화면을 보고 있지 않을 때는 서버 부하를 줄이기 위해 건너뜀
     const freshCounts = await getClassGroupCounts(program.id, cls.id);
     const freshPlan = computeGroupPlan(freshCounts, capacity);
     STATE.lastGroupPlan = freshPlan;
@@ -879,7 +877,7 @@ async function renderGroupSelectAsync(){
       const btn = document.getElementById('apply-btn');
       if(btn) btn.disabled = true;
     }
-  }, 4000);
+  }, 8000); // 신청 몰림 시 서버 부하를 줄이기 위해 폴링 간격을 다소 여유 있게 설정
 }
 function renderGroupGrid(plan, meta){
   let grid='';
@@ -978,7 +976,7 @@ function renderAdminLogin(){
     <div class="card">
       <h3 style="margin-top:0;">🔐 관리자 로그인</h3>
       <label>비밀번호</label>
-      <input type="password" id="admin-pw" placeholder="비밀번호 입력">
+      <input type="password" id="admin-pw" placeholder="비밀번호 입력" onkeydown="if(event.key==='Enter') adminLoginSubmit()">
       <div id="admin-login-err"></div>
       <button class="btn" onclick="adminLoginSubmit()">로그인</button>
     </div>
@@ -1033,13 +1031,13 @@ function renderAdminSettings(){
       <h3 style="margin-top:0;">신청 시작 일시</h3>
       <div class="summary-row"><span>현재 설정된 시작 일시</span><span>${fmtDateTime(CONFIG.openAt)}</span></div>
       <label>신청 가능 시작 시각 변경</label>
-      <input type="datetime-local" id="cfg-open" value="${CONFIG.openAt}">
+      <input type="datetime-local" id="cfg-open" value="${CONFIG.openAt}" onkeydown="if(event.key==='Enter'){event.preventDefault();saveOpenAt();}">
       <button class="btn small accent" style="margin-top:12px;width:auto;" onclick="saveOpenAt()">저장</button>
     </div>
     <div class="card">
       <h3 style="margin-top:0;">관리자 비밀번호 변경</h3>
       <label>새 비밀번호</label>
-      <input type="text" id="cfg-pw" placeholder="새 비밀번호 입력">
+      <input type="text" id="cfg-pw" placeholder="새 비밀번호 입력" onkeydown="if(event.key==='Enter') saveAdminPw()">
       <button class="btn small accent" style="margin-top:12px;width:auto;" onclick="saveAdminPw()">변경</button>
     </div>
     <div class="card">
@@ -1049,7 +1047,7 @@ function renderAdminSettings(){
         <button class="btn teal small" style="margin-top:8px;width:auto;" onclick="applyStandardCapacities()">🏫 표준 정원 일괄 적용</button>
       </div>
       <div class="inline-form">
-        <input type="text" id="new-prog-name" placeholder="새 프로그램 이름 (예: AI와 미래사회)">
+        <input type="text" id="new-prog-name" placeholder="새 프로그램 이름 (예: AI와 미래사회)" onkeydown="if(event.key==='Enter') addProgram()">
         <button class="btn small" onclick="addProgram()">+ 프로그램 추가</button>
       </div>
       <div style="margin-top:16px;">
@@ -1058,8 +1056,8 @@ function renderAdminSettings(){
             <h4>${p.name} <button class="link-btn" onclick="removeProgram('${p.id}')" style="color:var(--coral);">삭제</button></h4>
             <div>${p.classes.map(c=>`<span class="class-chip">${c.name} <b style="cursor:pointer;text-decoration:underline;" onclick="editClassCapacity('${p.id}','${c.id}')" title="정원 수정">(정원 ${c.capacity||26}명 ✏️)</b> <button onclick="removeClass('${p.id}','${c.id}')">×</button></span>`).join('') || '<span style="font-size:13px;color:var(--text-light);">등록된 반 없음</span>'}</div>
             <div class="inline-form">
-              <input type="text" id="new-class-${p.id}" placeholder="반 이름 (예: 2학년 7반)" style="flex:2;">
-              <input type="number" id="new-class-cap-${p.id}" placeholder="정원" value="26" style="flex:1;min-width:60px;">
+              <input type="text" id="new-class-${p.id}" placeholder="반 이름 (예: 2학년 7반)" style="flex:2;" onkeydown="if(event.key==='Enter') addClass('${p.id}')">
+              <input type="number" id="new-class-cap-${p.id}" placeholder="정원" value="26" style="flex:1;min-width:60px;" onkeydown="if(event.key==='Enter') addClass('${p.id}')">
               <button class="btn small" onclick="addClass('${p.id}')">+ 반 추가</button>
             </div>
           </div>
@@ -1311,7 +1309,7 @@ async function renderAdminManage(body){
       <h3 style="margin-top:0;">신청 취소 / 수정</h3>
       <label>학번으로 검색</label>
       <div class="inline-form">
-        <input type="text" id="manage-sid" placeholder="학번 입력">
+        <input type="text" id="manage-sid" placeholder="학번 입력" onkeydown="if(event.key==='Enter') searchManageSid()">
         <button class="btn small" onclick="searchManageSid()">검색</button>
       </div>
       <div id="manage-result" style="margin-top:16px;"></div>
