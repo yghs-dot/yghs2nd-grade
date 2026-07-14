@@ -478,6 +478,7 @@ function render(){
   const app = document.getElementById('app');
   if(STATE.countdownTimer){ clearInterval(STATE.countdownTimer); STATE.countdownTimer=null; }
   if(STATE.groupPollTimer && STATE.screen!=='groupSelect'){ clearInterval(STATE.groupPollTimer); STATE.groupPollTimer=null; }
+  if(STATE.classPollTimer && STATE.screen!=='classSelect'){ clearInterval(STATE.classPollTimer); STATE.classPollTimer=null; }
   switch(STATE.screen){
     case 'home': renderHome(); break;
     case 'studentLogin': app.innerHTML = renderStudentLogin(); break;
@@ -802,6 +803,29 @@ async function renderClassSelectAsync(){
   if(!program){ goHome(); return; }
   const meta = getTrackMeta(program.id);
   const countsByClass = await getProgramClassCounts(program.id);
+  app.innerHTML = `
+    ${topBar(true)}
+    ${trail(2)}
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <div style="width:38px;height:38px;border-radius:10px;background:${meta.color}1A;display:flex;align-items:center;justify-content:center;font-size:18px;">${meta.icon}</div>
+        <h3 style="margin:0;">${program.name}</h3>
+      </div>
+      <div style="font-size:14px;color:var(--text-light);margin-bottom:8px;">반을 선택하세요</div>
+      <div id="class-rows">${renderClassRows(program, countsByClass, meta)}</div>
+      <button class="btn secondary" onclick="STATE.screen='programSelect'; render();">← 프로그램 다시 선택</button>
+    </div>
+  `;
+  // 다른 학생의 신청으로 인원이 바뀌는 것을 실시간에 가깝게 반영 (수 초 간격 자동 새로고침)
+  STATE.classPollTimer = setInterval(async ()=>{
+    if(STATE.screen!=='classSelect'){ clearInterval(STATE.classPollTimer); STATE.classPollTimer=null; return; }
+    if(document.hidden) return;
+    const freshCounts = await getProgramClassCounts(program.id);
+    const rowsEl = document.getElementById('class-rows');
+    if(rowsEl) rowsEl.innerHTML = renderClassRows(program, freshCounts, meta);
+  }, 8000);
+}
+function renderClassRows(program, countsByClass, meta){
   let rows='';
   program.classes.forEach((c)=>{
     const n = countsByClass[c.id] || 0;
@@ -812,19 +836,7 @@ async function renderClassSelectAsync(){
       <span class="badge ${full?'full':''}" style="${full?'':'background:'+meta.color+'1A;color:'+meta.color+';'}">${full?'마감':n+'명'}</span>
     </div>`;
   });
-  app.innerHTML = `
-    ${topBar(true)}
-    ${trail(2)}
-    <div class="card">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-        <div style="width:38px;height:38px;border-radius:10px;background:${meta.color}1A;display:flex;align-items:center;justify-content:center;font-size:18px;">${meta.icon}</div>
-        <h3 style="margin:0;">${program.name}</h3>
-      </div>
-      <div style="font-size:14px;color:var(--text-light);margin-bottom:8px;">반을 선택하세요</div>
-      ${rows || '<div class="msg-box">등록된 반이 없습니다.</div>'}
-      <button class="btn secondary" onclick="STATE.screen='programSelect'; render();">← 프로그램 다시 선택</button>
-    </div>
-  `;
+  return rows || '<div class="msg-box">등록된 반이 없습니다.</div>';
 }
 function selectClass(cid){
   STATE.selection.classId = cid;
@@ -1044,7 +1056,7 @@ function renderAdminSettings(){
       <h3 style="margin-top:0;">프로그램 / 반 관리</h3>
       <div class="msg-box" style="margin-bottom:14px;">
         이미 등록되어 있던 반의 정원이 예전 값(26명)으로 보인다면, 아래 버튼으로 교실 수용 인원 기준(1·2·5반 24명 / 4·6반 25명 / 3반 26명)을 한 번에 적용할 수 있습니다.
-        <button class="btn teal small" style="margin-top:8px;width:auto;" onclick="applyStandardCapacities()">🏫 표준 정원 일괄 적용</button>
+        <button class="btn teal small" style="margin-top:8px;width:auto;" onclick="applyStandardCapacities()">🏫 표준 반 이름·정원 일괄 적용</button>
       </div>
       <div class="inline-form">
         <input type="text" id="new-prog-name" placeholder="새 프로그램 이름 (예: AI와 미래사회)" onkeydown="if(event.key==='Enter') addProgram()">
@@ -1054,7 +1066,7 @@ function renderAdminSettings(){
         ${CONFIG.programs.map(p=>`
           <div class="prog-block">
             <h4>${p.name} <button class="link-btn" onclick="removeProgram('${p.id}')" style="color:var(--coral);">삭제</button></h4>
-            <div>${p.classes.map(c=>`<span class="class-chip">${c.name} <b style="cursor:pointer;text-decoration:underline;" onclick="editClassCapacity('${p.id}','${c.id}')" title="정원 수정">(정원 ${c.capacity||26}명 ✏️)</b> <button onclick="removeClass('${p.id}','${c.id}')">×</button></span>`).join('') || '<span style="font-size:13px;color:var(--text-light);">등록된 반 없음</span>'}</div>
+            <div>${p.classes.map(c=>`<span class="class-chip"><b style="cursor:pointer;text-decoration:underline;" onclick="editClassName('${p.id}','${c.id}')" title="이름 수정">${c.name} ✏️</b> <b style="cursor:pointer;text-decoration:underline;" onclick="editClassCapacity('${p.id}','${c.id}')" title="정원 수정">(정원 ${c.capacity||26}명 ✏️)</b> <button onclick="removeClass('${p.id}','${c.id}')">×</button></span>`).join('') || '<span style="font-size:13px;color:var(--text-light);">등록된 반 없음</span>'}</div>
             <div class="inline-form">
               <input type="text" id="new-class-${p.id}" placeholder="반 이름 (예: 2학년 7반)" style="flex:2;" onkeydown="if(event.key==='Enter') addClass('${p.id}')">
               <input type="number" id="new-class-cap-${p.id}" placeholder="정원" value="26" style="flex:1;min-width:60px;" onkeydown="if(event.key==='Enter') addClass('${p.id}')">
@@ -1113,19 +1125,36 @@ function addClass(pid){
   saveConfigInBackground(false);
 }
 function applyStandardCapacities(){
-  // 기존에 이미 저장되어 있던 반(예전 이름/정원 없음)에도 교실 수용 인원 기준을 그대로 적용
-  // 프로그램별 반 순서 기준: 트랙A(1,2반)=24,24 / 트랙B(4,5반)=25,24 / 트랙C(3반)=26 / 트랙D(6반)=25
-  const capMap = { trackA:[24,24], trackB:[25,24], trackC:[26], trackD:[25] };
+  // 기존에 이미 저장되어 있던 반(예전 이름/정원)에도 학급 배정 기준을 그대로 적용
+  // 프로그램별 반 순서 기준: 트랙A(1,2반)=2학년1반24명,2학년2반24명 / 트랙B(4,5반)=2학년4반25명,2학년5반24명
+  //                          트랙C(3반)=2학년3반26명 / 트랙D(6반)=2학년6반25명
+  const stdMap = {
+    trackA: [ {name:'2학년 1반', capacity:24}, {name:'2학년 2반', capacity:24} ],
+    trackB: [ {name:'2학년 4반', capacity:25}, {name:'2학년 5반', capacity:24} ],
+    trackC: [ {name:'2학년 3반', capacity:26} ],
+    trackD: [ {name:'2학년 6반', capacity:25} ]
+  };
   let applied = 0;
   CONFIG.programs.forEach(p=>{
-    const caps = capMap[p.id];
-    if(!caps) return;
-    p.classes.forEach((c,i)=>{ if(caps[i]!==undefined){ c.capacity = caps[i]; applied++; } });
+    const std = stdMap[p.id];
+    if(!std) return;
+    p.classes.forEach((c,i)=>{ if(std[i]!==undefined){ c.name = std[i].name; c.capacity = std[i].capacity; applied++; } });
   });
   render();
   saveConfigInBackground(true, applied>0
-    ? `표준 정원이 적용되었습니다. (총 ${applied}개 반)`
-    : '일치하는 반을 찾지 못했습니다. 각 반의 ✏️를 눌러 정원을 직접 입력해주세요.');
+    ? `표준 반 이름·정원이 적용되었습니다. (총 ${applied}개 반)`
+    : '일치하는 반을 찾지 못했습니다. 각 반의 ✏️를 눌러 직접 입력해주세요.');
+}
+function editClassName(pid, cid){
+  const p = findProgram(pid);
+  const c = findClass(p, cid);
+  showPromptDialog(`반 이름을 입력하세요.`, c.name, (val)=>{
+    const name = (val||'').trim();
+    if(!name){ showAlert('반 이름을 입력해주세요.'); return; }
+    c.name = name;
+    render();
+    saveConfigInBackground(false);
+  });
 }
 function editClassCapacity(pid, cid){
   const p = findProgram(pid);
