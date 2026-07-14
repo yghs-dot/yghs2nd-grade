@@ -442,7 +442,8 @@ function computeGroupPlan(counts, capacity){
 
 // ---------- application data helpers (Google Apps Script 백엔드 호출) ----------
 async function getClassGroupCounts(pid,cid){
-  const r = await apiCall('getGroupCounts', { programId:pid, classId:cid });
+  let r = await apiCall('getGroupCounts', { programId:pid, classId:cid });
+  if(!r || !r.counts) r = await apiCall('getGroupCounts', { programId:pid, classId:cid }); // 첫 시도 실패(서버 지연 등) 시 한 번 더 재시도
   return (r && r.counts) ? r.counts : {1:0,2:0,3:0,4:0,5:0,6:0};
 }
 async function getClassApplications(pid,cid){
@@ -454,7 +455,8 @@ async function getClassCount(pid,cid){
   return Object.values(counts).reduce((a,b)=>a+b,0);
 }
 async function getProgramClassCounts(pid){
-  const r = await apiCall('getProgramClassCounts', { programId: pid });
+  let r = await apiCall('getProgramClassCounts', { programId: pid });
+  if(!r || !r.counts) r = await apiCall('getProgramClassCounts', { programId: pid }); // 첫 시도 실패(서버 지연 등) 시 한 번 더 재시도
   return (r && r.counts) ? r.counts : {};
 }
 async function getAllApplications(){
