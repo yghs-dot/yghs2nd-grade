@@ -348,6 +348,7 @@ async function initApp(){
   checkStorageHealth();
   renderInitialShell(); // 네트워크 응답을 기다리는 동안에도 화면이 비어있지 않도록 즉시 표시
   if(STORAGE_OK){
+    await jitterDelay(6000); // 다수 학생이 동시에 접속할 때 요청이 한 순간에 몰리지 않도록 분산 (동시 실행 30건 한도 대응)
     await fetchConfigOnly(); // 첫 화면 표시에 필요한 최소 데이터만 우선 로드 (왕복 1회)
     if(!CONFIG) CONFIG = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
     fetchRosterOnly(); // 명단은 화면을 막지 않고 백그라운드에서 조용히 로드
@@ -357,6 +358,10 @@ async function initApp(){
   }
   render();
   startBackgroundSync();
+}
+function jitterDelay(maxMs){
+  const ms = Math.random() * (maxMs || 2500);
+  return new Promise(resolve=>setTimeout(resolve, ms));
 }
 function renderInitialShell(){
   const app = document.getElementById('app');
@@ -933,6 +938,9 @@ async function confirmApply(){
     render();
     return;
   }
+  // 완전히 같은 순간에 다수가 "신청하기"를 눌러도 서버 동시 실행 한도(30건)를 넘지 않도록,
+  // 모두에게 공평하게 적용되는 작은 무작위 지연을 둔 뒤 실제 요청을 보냅니다.
+  await jitterDelay(1200);
   const program = findProgram(STATE.selection.programId);
   const cls = findClass(program, STATE.selection.classId);
   const g = STATE.selection.group;
@@ -942,10 +950,18 @@ async function confirmApply(){
     classId: cls.id, className: cls.name,
     group: g
   };
-  // 서버(Apps Script)가 Lock으로 동시 신청 충돌을 방지하며 중복신청/정원을 함께 검증합니다.
-  const result = await apiCall('submitApplication', record);
+  // 서버(Apps Script)가 도착한 순서대로 한 명씩 공정하게 처리하며 중복신청/정원을 함께 검증합니다.
+  // 동시 접속이 몰려 대기열이 길어져도 끊기지 않도록 한 번의 시도에 충분히 긴 시간을 기다리고,
+  // 그래도 실패하면 자동으로 한 번 더 시도합니다.
+  let result = null;
+  for(let attempt=0; attempt<2; attempt++){
+    if(attempt>0){ if(btn) btn.textContent = '처리 중... (다시 시도 중)'; await jitterDelay(1000); }
+    if(btn) btn.textContent = attempt===0 ? '처리 중... (신청이 몰리면 최대 30초 정도 걸릴 수 있어요)' : btn.textContent;
+    result = await apiCall('submitApplication', record, 32000);
+    if(result && !result.error) break;
+  }
   if(!result || result.error){
-    showAlert('⚠️ 신청 처리 중 오류가 발생했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.');
+    showAlert('⚠️ 신청이 몰려 서버 응답이 지연되고 있습니다. 잠시 후 "신청하기"를 다시 눌러주세요.\n(이미 신청이 접수됐을 수 있으니, 처음 화면으로 돌아가 본인확인을 다시 해보시면 신청 여부를 확인할 수 있습니다.)');
     render();
     return;
   }
