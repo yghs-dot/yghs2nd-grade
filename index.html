@@ -1241,10 +1241,28 @@ function clearRoster(){
 async function renderAdminStatus(body){
   body.innerHTML = `<div class="card">불러오는 중...</div>`;
   const all = await getAllApplications();
+  const countByClass = {};
+  all.forEach(a=>{ countByClass[a.classId] = (countByClass[a.classId]||0)+1; });
+  const summaryRows = [];
+  CONFIG.programs.forEach(p=>{
+    p.classes.forEach(c=>{
+      const n = countByClass[c.id] || 0;
+      const cap = c.capacity || 26;
+      const full = n>=cap;
+      summaryRows.push(`<tr><td>${p.name.split('(')[0].trim()}</td><td>${c.name}</td><td>${n} / ${cap}명</td><td>${full?'<span class="badge full">마감</span>':'<span class="badge">모집중</span>'}</td></tr>`);
+    });
+  });
   const rows = all.map(a=>`<tr><td>${a.programName}</td><td>${a.className}</td><td>${a.group}모둠</td><td>${a.sid}</td><td>${a.name}</td><td>${a.birth}</td><td>${fmtDateTime(a.appliedAt)}</td></tr>`).join('');
   body.innerHTML = `
     <div class="card">
-      <h3 style="margin-top:0;">신청 현황 (${all.length}명)</h3>
+      <h3 style="margin-top:0;">반별 신청 인원 현황</h3>
+      <div class="table-wrap">
+        <table><thead><tr><th>프로그램</th><th>반</th><th>신청 인원</th><th>상태</th></tr></thead>
+        <tbody>${summaryRows.join('') || '<tr><td colspan="4" style="text-align:center;color:#999;">등록된 반 없음</td></tr>'}</tbody></table>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">전체 신청 현황 (${all.length}명)</h3>
       <button class="btn accent small" onclick="exportAllApplications()">⬇ 신청현황 엑셀 다운로드</button>
       <button class="btn teal small" onclick="exportAttendanceBook()">📋 반별 출석부 다운로드 (학번순)</button>
       <div class="table-wrap" style="margin-top:14px;">
